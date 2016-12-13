@@ -27,9 +27,10 @@
 #include <avr/power.h>					// AVR clock prescale functions
 #endif
 
-#define BUTTON_PIN			1			// pin with button attached
-#define PIXEL_PIN			2			// pin with NeoPixels attached
-#define PIXEL_NUM			12			// number of NeoPixels to control
+#define PIN_BUTTON			1			// pin with button attached
+#define PIN_PIXELS			2			// pin with NeoPixels attached
+#define NUM_PIXELS			12			// number of NeoPixels to control
+#define PIXEL_BRIGHTNESS	80			// how bright to make the pixels (0-255)
 
 //                            RRGGBB
 #define COLOR_BLACK			0x000000
@@ -56,7 +57,7 @@
 #define COLOR_CRIMSON		0xDC283C
 #define COLOR_PURPLE		0x8C00FF
 
-typedef enum							// list of visual effects we support
+enum									// modes of operation
 {
 	EFFECT_ALL = 0,						// rotate through all the effects
 	EFFECT_BREATHE,						// one color; dim and brighten
@@ -65,21 +66,17 @@ typedef enum							// list of visual effects we support
 	EFFECT_RAINBOW,						// many colors; all pixels the same
 	EFFECT_RAINBOW_CYCLE,				// many colors; all pixels different
 	EFFECT_THEATRE_CHASE_RAINBOW,		// many colors; chasing lights
+	NUM_MODES
 } ledEffect_t;
 
-byte g_color;							// current color for single-color effects
-ledEffect_t g_effect;					// current effect
+int g_buttonState;						// variable to hold the button state
+int g_lightMode = EFFECT_BREATHE;		// what mode we're in
+int g_lightModePrev = EFFECT_BREATHE;	// the last mode we were in
 
-// Declare a strip of pixels.
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(PIXEL_NUM, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
+// Create a NeoPixel object.
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_PIXELS, PIN_PIXEL, NEO_GRB + NEO_KHZ800);
 
-/******************************************************************************
- *
- *	Function:		setup
- *
- *	Description:	Initializes the NeoPixels and other peripheral libraries.
- *
- ******************************************************************************/
+// This code runs once, at startup.
 void setup()
 {
 	// If this code is running on a 16 MHz Trinket, set clock divider.
@@ -87,30 +84,63 @@ void setup()
 	clock_prescale_set(clock_div_1);
 #endif
 
+	// Set the button's pin as input with internal pull-up resistor.
+	pinMode(PIN_BUTTON, INPUT_PULLUP);
+	
+	// Set the pixel pin as output.
+	pinMode(PIN_PIXELS, OUTPUT);
+
 	// Initialize the pixels.
 	strip.begin();
 
 	// If you want, set the brightness.  Else it will be really bright.
-//	strip.setBrightness(192);
+	strip.setBrightness(PIXEL_BRIGHTNESS);
+	
+	// Read the initial state of the switch.
+	g_buttonState = digitalRead(PIN_BUTTON);
 
 	// Initialize all pixels to 'off'.
 	strip.show();
-
-	// Initialize state machine variables.
-	g_color = COLOR_RED;
-	g_effect = EFFECT_BREATHE;
 }
 
-/******************************************************************************
- *
- *	Function:		loop
- *
- *	Description:	Where the magic begins...
- *
- ******************************************************************************/
+// This code runs over and over forever.
 void loop()
 {
-	switch (g_effect)
+	int val;	// variable for reading the button
+	int val2;	// variable for debouncing the button
+	
+	// Read the button (twice, to debounce it).
+	val = digitalRead(PIN_BUTTON);
+	delay (20);
+	val2 = digitalRead(PIN_BUTTON);
+	
+	// If the button has been pressed...
+	if ((val == val2) && (val != g_buttonState) && (val == LOW))
+	{
+		// Change the mode.
+		g_lightMode++;
+		
+		// If we've reached the last mode, start over.
+		if (g_lightMode == NUM_MODES)
+			g_lightMode = 0;
+	}
+	
+	// Save the new state in our variable.
+	g_buttonState = val;
+	
+	// If we've just entered a new light mode...
+	if (g_lightModePrev != g_lightMode)
+	{
+		// Do anything required when a mode starts.
+		if (g_lightMode == EFFECT_RAINBOW)
+			RainbowInit();
+		
+		// Ensure that this stuff only happens once.
+		g_lightModePrev = g_lightMode;
+	}
+	
+	// Do any recurring actions associated with the light mode.
+	switch (g_lightMode)
 	{
 	case EFFECT_ALL:
 		break;
@@ -187,7 +217,7 @@ void EffectColorWipe(uint32_t c, uint8_t wait)
 
 void EffectRainbow(uint8_t wait)
 {
-	uint16_t i;
+	uint16_t i;		// counter for number of pixels
 	uint16_t j;
 	
 	for (j = 0; j < 256; j++)
@@ -210,11 +240,17 @@ void EffectRainbowCycle(uint8_t wait)
 	// 5 cycles of all colors on wheel
 	for (j = 0; j < 256 * 5; j++)
 	{
-		for(i=0; i< strip.numPixels(); i++)
+		// For each pixel...
+		for(i = 0; i < strip.numPixels(); i++)
 		{
+			// Set the pixel to the next color of the rainbow.
 			strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + j) & 255));
 		}
+		
+		// Send the new colors to the pixels.
 		strip.show();
+		
+		// Pause for effect (different values here change the rainbow's speed).
 		delay(wait);
 	}
 }
@@ -271,21 +307,25 @@ void EffectTheaterChaseRainbow(uint8_t wait)
 	}
 }
 
-// Input a value 0 to 255 to get a color value.
-// The colours are a transition r - g - b - back to r.
+/*******************************************************************************
+*	Input a value 0 to 255 to get a color value.
+*	The colours are a transition r - g - b - back to r.
+*******************************************************************************/
+
 uint32_t Wheel(byte wheelPos)
 {
-	wheelPos = 255 - wheelPos;
-	
-	if (wheelPos < 85)
+	if (WheelPos < 85)
 	{
-		return strip.Color(255 - wheelPos * 3, 0, wheelPos * 3);
+		return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
 	}
-	if (wheelPos < 170)
+	else if (WheelPos < 170)
 	{
-		wheelPos -= 85;
-		return strip.Color(0, wheelPos * 3, 255 - wheelPos * 3);
+		WheelPos -= 85;
+		return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
 	}
-	wheelPos -= 170;
-	return strip.Color(wheelPos * 3, 255 - wheelPos * 3, 0);
+	else
+	{
+		WheelPos -= 170;
+		return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+	}
 }
