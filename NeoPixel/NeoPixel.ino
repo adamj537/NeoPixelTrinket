@@ -59,22 +59,22 @@
 
 enum									// modes of operation
 {
-	EFFECT_ALL = 0,						// rotate through all the effects
+//	EFFECT_ALL = 0,						// rotate through all the effects
 	EFFECT_BREATHE,						// one color; dim and brighten
-	EFFECT_COLOR_WIPE,					// one color; update one pixel at a time
-	EFFECT_THEATRE_CHASE,				// one color; chasing lights
+//	EFFECT_COLOR_WIPE,					// one color; update one pixel at a time
+//	EFFECT_THEATRE_CHASE,				// one color; chasing lights
 	EFFECT_RAINBOW,						// many colors; all pixels the same
-	EFFECT_RAINBOW_CYCLE,				// many colors; all pixels different
-	EFFECT_THEATRE_CHASE_RAINBOW,		// many colors; chasing lights
-	NUM_MODES
-} ledEffect_t;
+//	EFFECT_RAINBOW_CYCLE,				// many colors; all pixels different
+//	EFFECT_THEATRE_CHASE_RAINBOW,		// many colors; chasing lights
+	NUM_EFFECTS
+};
 
 int g_buttonState;						// variable to hold the button state
-int g_lightMode = EFFECT_BREATHE;		// what mode we're in
-int g_lightModePrev = EFFECT_BREATHE;	// the last mode we were in
+int g_effect = EFFECT_RAINBOW;			// what mode we're in
+int g_effectPrev = NUM_EFFECTS;			// the last mode we were in
 
 // Create a NeoPixel object.
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_PIXELS, PIN_PIXEL, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_PIXELS, PIN_PIXELS, NEO_GRB + NEO_KHZ800);
 
 // This code runs once, at startup.
 void setup()
@@ -99,6 +99,11 @@ void setup()
 	// Read the initial state of the switch.
 	g_buttonState = digitalRead(PIN_BUTTON);
 
+	// DEBUG
+	Serial.begin(9600);
+	Serial.print("g_buttonState = ");
+	Serial.println(g_buttonState);
+
 	// Initialize all pixels to 'off'.
 	strip.show();
 }
@@ -118,52 +123,64 @@ void loop()
 	if ((val == val2) && (val != g_buttonState) && (val == LOW))
 	{
 		// Change the mode.
-		g_lightMode++;
+		g_effect++;
+		Serial.print("g_effect = ");
+		Serial.println(g_effect);
 		
 		// If we've reached the last mode, start over.
-		if (g_lightMode == NUM_MODES)
-			g_lightMode = 0;
+		if (g_effect == NUM_EFFECTS)
+			g_effect = 0;
 	}
 	
 	// Save the new state in our variable.
 	g_buttonState = val;
 	
 	// If we've just entered a new light mode...
-	if (g_lightModePrev != g_lightMode)
+	if (g_effectPrev != g_effect)
 	{
+		switch (g_effect)
+		{
 		// Do anything required when a mode starts.
-		if (g_lightMode == EFFECT_RAINBOW)
-			RainbowInit();
+		case EFFECT_BREATHE:
+			EffectBreatheInit();
+			Serial.println("EffectBreatheInit called");
+			break;
+		
+		case EFFECT_RAINBOW:
+			EffectRainbowInit();
+			Serial.println("EffectRainbotInit called");
+			break;
+		}
 		
 		// Ensure that this stuff only happens once.
-		g_lightModePrev = g_lightMode;
+		g_effectPrev = g_effect;
 	}
 	
 	// Do any recurring actions associated with the light mode.
-	switch (g_lightMode)
+	switch (g_effect)
 	{
-	case EFFECT_ALL:
-		break;
+//	case EFFECT_ALL:
+//		break;
 	
 	case EFFECT_BREATHE:
 		EffectBreathe(COLOR_RED);
-		EffectBreathe(COLOR_BLUE);
+//		EffectBreathe(COLOR_BLUE);
 		break;
-
+		
+	case EFFECT_RAINBOW:
+		EffectRainbow();
+		break;
+/*
 	case EFFECT_COLOR_WIPE:
 		EffectColorWipe(COLOR_RED, 50);
-		EffectColorWipe(COLOR_GREEN, 50);
-		EffectColorWipe(COLOR_BLUE, 50);
+//		EffectColorWipe(COLOR_GREEN, 50);
+//		EffectColorWipe(COLOR_BLUE, 50);
 		break;
 		
 	case EFFECT_THEATRE_CHASE:
 		EffectTheaterChase(COLOR_LIGHT_WHITE, 50);
-		EffectTheaterChase(COLOR_LIGHT_RED, 50);
-		EffectTheaterChase(COLOR_LIGHT_BLUE, 50);
-		break;
-		
-	case EFFECT_RAINBOW:
-		EffectRainbow(20);
+//		EffectTheaterChase(COLOR_LIGHT_RED, 50);
+//		EffectTheaterChase(COLOR_LIGHT_BLUE, 50);
 		break;
 		
 	case EFFECT_RAINBOW_CYCLE:
@@ -173,65 +190,119 @@ void loop()
 	case EFFECT_THEATRE_CHASE_RAINBOW:
 		EffectTheaterChaseRainbow(50);
 		break;
-
+*/
 	default:
-		g_effect = EFFECT_ALL;
+		g_effect = 0;
 	}
+}
+
+/******************************************************************************
+ *	Fade the lights on and off slowly using one color.
+ *****************************************************************************/
+
+#define BREATHE_MAX_BRIGHTNESS	255
+#define BREATHE_SPEED_FACTOR	0.016	// I don't actually know what would look good
+#define BREATHE_DELAY			5		// ms for a step delay on the lights
+
+uint16_t g_breatheCounter;				// counter to loop with
+
+void EffectBreatheInit(void)
+{
+	g_breatheCounter = 0;
+	
+	// Light up a single pixel, to tell us what mode we're in.
+	for (int i = 0; i < NUM_PIXELS; i++)
+	{
+		strip.setPixelColor(i, COLOR_BLACK);
+	}
+	strip.setPixelColor(1, COLOR_RED);
+	strip.show();
+	
+	// Pause for effect.
+	delay(500);
 }
 
 void EffectBreathe(uint32_t color)
 {
-	float MaximumBrightness = 255;
-	float SpeedFactor = 0.008; // I don't actually know what would look good
-	float StepDelay = 5; // ms for a step delay on the lights
-	
-	// Make the lights breathe
-	for (int i = 0; i < 65535; i++)
-	{
-		// Intensity will go from 10 - MaximumBrightness in a "breathing" manner
-		float intensity = MaximumBrightness /2.0 * (1.0 + sin(SpeedFactor * i));
-		strip.setBrightness(intensity);
-	
-		// Now set every LED to that color
-		for (int ledNumber = 0; ledNumber < PIXEL_NUM; ledNumber++)
-			strip.setPixelColor(ledNumber, color);
+	// Intensity will go from 10 - BREATHE_MAX_BRIGHTNESS in a "breathing" manner
+	float intensity = BREATHE_MAX_BRIGHTNESS /2.0 * (1.0 + sin(BREATHE_SPEED_FACTOR * g_breatheCounter));
+	strip.setBrightness(intensity);
 
-		// Send data to the NeoPixels.
-		strip.show();
-		
-		// Wait a bit before continuing to breathe.
-		delay(StepDelay);
-	}
+	// Now set every LED to that color
+	for (int ledNumber = 0; ledNumber < NUM_PIXELS; ledNumber++)
+		strip.setPixelColor(ledNumber, color);
+
+	// Send data to the NeoPixels.
+	strip.show();
+	
+	// Increment our counter.
+	// Since it's a uint16_t, it will start over again after 65535.
+	g_breatheCounter++;
 }
 
-// Fill the dots one after the other with a color
-void EffectColorWipe(uint32_t c, uint8_t wait)
+/******************************************************************************
+ *	TODO:  Fill the dots one after the other with a color.
+ *****************************************************************************/
+
+void EffectColorWipe(uint32_t color, uint8_t wait)
 {
 	for (uint16_t i = 0; i < strip.numPixels(); i++)
 	{
-		strip.setPixelColor(i, c);
+		strip.setPixelColor(i, color);
 		strip.show();
 		delay(wait);
 	}
 }
 
-void EffectRainbow(uint8_t wait)
+/******************************************************************************
+ *	Show a rainbow effect.
+ *****************************************************************************/
+
+uint8_t g_rainbowCounter;
+
+void EffectRainbowInit(void)
+{
+	g_rainbowCounter = 0;
+	
+// Light up a single pixel, to tell us what mode we're in.
+	for (int i = 0; i < NUM_PIXELS; i++)
+	{
+		strip.setPixelColor(i, COLOR_BLACK);
+	}
+	strip.setPixelColor(1, COLOR_RED);
+	strip.setPixelColor(2, COLOR_RED);
+	strip.show();
+	
+	// Pause for effect.
+	delay(500);
+}
+
+void EffectRainbow(void)
 {
 	uint16_t i;		// counter for number of pixels
 	uint16_t j;
 	
-	for (j = 0; j < 256; j++)
+	for (i = 0; i < strip.numPixels(); i++)
 	{
-		for (i = 0; i < strip.numPixels(); i++)
-		{
-			strip.setPixelColor(i, Wheel((i+j) & 255));
-		}
-		strip.show();
-		delay(wait);
+		strip.setPixelColor(i, Wheel((i + g_rainbowCounter) & 255));
 	}
+	
+	// Send the new colors to the pixels.
+	strip.show();
+	
+	// Pause for effect (different values here change the rainbow's speed).
+//	delay(wait);
+	
+	// Increment our counter.
+	// Since it's a uint8_t, it will start over again after 255.
+	// This will do a cycle of all colors in the Wheel function.
+	g_rainbowCounter++;
 }
 
-// Slightly different, this makes the rainbow equally distributed throughout
+/******************************************************************************
+ *	TODO:  Slightly different, this makes the rainbow equally distributed throughout
+ *****************************************************************************/
+
 void EffectRainbowCycle(uint8_t wait)
 {
 	uint16_t i;
@@ -314,18 +385,18 @@ void EffectTheaterChaseRainbow(uint8_t wait)
 
 uint32_t Wheel(byte wheelPos)
 {
-	if (WheelPos < 85)
+	if (wheelPos < 85)
 	{
-		return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+		return strip.Color(wheelPos * 3, 255 - wheelPos * 3, 0);
 	}
-	else if (WheelPos < 170)
+	else if (wheelPos < 170)
 	{
-		WheelPos -= 85;
-		return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+		wheelPos -= 85;
+		return strip.Color(255 - wheelPos * 3, 0, wheelPos * 3);
 	}
 	else
 	{
-		WheelPos -= 170;
-		return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+		wheelPos -= 170;
+		return strip.Color(0, wheelPos * 3, 255 - wheelPos * 3);
 	}
 }
